@@ -35,3 +35,6 @@ jobs:
 
       - name: Validate installed dependencies
         run: python -m pip check
+      
+      - name: Run automated tests
+        run: python -m pytest -v
