@@ -1,8 +1,9 @@
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,14 +17,21 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Application settings
     app_name: str = "Enterprise Knowledge Retrieval & RAG Assistant"
-    app_environment: Literal["development", "testing", "production"] = ("development")
+    app_environment: Literal[
+        "development", "testing", "production"
+    ] = "development"
     debug: bool = False
     api_prefix: str = "/api/v1"
 
-    # Keep secrets out of source code and prevent accidental display.
+    # OpenAI configuration
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-4o-mini"
+
+    # Document upload configuration
+    max_upload_size_mb: int = Field(default=25, ge=1)
+    storage_root: Path = Path("storage")
 
 
 @lru_cache(maxsize=1)
