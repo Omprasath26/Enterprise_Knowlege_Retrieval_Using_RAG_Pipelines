@@ -5,8 +5,16 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+DocumentStatus = Literal[
+    "UPLOADED",
+    "PROCESSING",
+    "COMPLETED",
+    "FAILED",
+]
+
+
 class DocumentUploadResponse(BaseModel):
-    """Response returned after a successful document upload."""
+    """Response returned after a document upload."""
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -17,7 +25,8 @@ class DocumentUploadResponse(BaseModel):
                 "file_size": 125000,
                 "checksum": "a" * 64,
                 "status": "UPLOADED",
-                "message": "Document uploaded successfully",
+                "task_id": "example-celery-task-id",
+                "message": "Document uploaded and ingestion queued.",
             }
         }
     )
@@ -30,17 +39,33 @@ class DocumentUploadResponse(BaseModel):
         pattern=r"^[a-fA-F0-9]{64}$",
         description="SHA-256 checksum",
     )
-    status: Literal["UPLOADED"] = "UPLOADED"
+    status: DocumentStatus = "UPLOADED"
+    task_id: str | None = Field(
+        default=None,
+        description="Celery task ID, if ingestion was queued",
+    )
     message: str = "Document uploaded successfully"
 
 
 class DocumentMetadata(BaseModel):
-    """Internal document metadata representation."""
+    """Document metadata stored in SQLite."""
 
     document_id: str
     filename: str
     file_type: str
     file_size: int
     checksum: str
-    status: Literal["UPLOADED", "PROCESSING", "COMPLETED", "FAILED"]
+    status: DocumentStatus
     uploaded_at: datetime
+
+
+class DocumentStatusResponse(BaseModel):
+    """Response returned when checking document processing status."""
+
+    document_id: str
+    filename: str
+    file_type: str
+    file_size: int
+    status: DocumentStatus
+    uploaded_at: datetime
+    message: str

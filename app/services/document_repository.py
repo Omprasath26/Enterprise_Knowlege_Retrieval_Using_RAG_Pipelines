@@ -17,6 +17,14 @@ class DocumentRepositoryError(Exception):
     """Raised when a database operation fails."""
 
 
+class DocumentNotFoundError(DocumentRepositoryError):
+    """Raised when the requested document does not exist."""
+
+
+class InvalidDocumentStatusTransitionError(DocumentRepositoryError):
+    """Raised when a document status transition is not permitted."""
+
+
 def get_database_path() -> Path:
     """Return the configured SQLite database path."""
 
@@ -41,11 +49,9 @@ def get_connection() -> Iterator[sqlite3.Connection]:
 
         yield connection
 
-        # Commit changes when the operation completes successfully.
         connection.commit()
 
     except BaseException:
-        # Roll back pending changes if any operation fails.
         connection.rollback()
         raise
 
@@ -109,7 +115,6 @@ def register_document(
 
     try:
         with get_connection() as connection:
-            # Acquire a write reservation before checking uniqueness.
             connection.execute("BEGIN IMMEDIATE")
 
             existing = connection.execute(
@@ -183,7 +188,7 @@ def register_document(
 
 
 def get_document_by_id(document_id: str) -> dict[str, Any] | None:
-    """Retrieve a document using its unique document ID."""
+    """Retrieve a document using its unique ID."""
 
     try:
         with get_connection() as connection:
@@ -215,4 +220,91 @@ def get_document_by_checksum(checksum: str) -> dict[str, Any] | None:
     except sqlite3.Error as exc:
         raise DocumentRepositoryError(
             "Failed to retrieve document metadata."
+        ) from exc
+
+
+def update_document_status(
+    document_id: str,
+    new_status: str,
+) -> dict[str, Any]:
+    """Update document status using validated, atomic transitions."""
+
+    allowed_statuses = {
+        "UPLOADED",
+        "PROCESSING",
+        "COMPLETED",
+        "FAILED",
+    }
+
+    allowed_transitions = {
+        "UPLOADED": {"PROCESSING"},
+        "PROCESSING": {"COMPLETED", "FAILED"},
+        "FAILED": {"PROCESSING"},
+        "COMPLETED": set(),
+    }
+
+    if new_status not in allowed_statuses:
+        raise InvalidDocumentStatusTransitionError(
+            f"Unsupported document status: {new_status}"
+        )
+
+    try:
+        with get_connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+
+            row = connection.execute(
+                """
+                SELECT *
+                FROM documents
+                WHERE document_id = ?
+                """,
+                (document_id,),
+            ).fetchone()
+
+            if row is None:
+                raise DocumentNotFoundError(
+                    f"Document not found: {document_id}"
+                )
+
+            current_status = row["status"]
+
+            # Repeated updates to the same status are idempotent.
+            if current_status == new_status:
+                return dict(row)
+
+            if new_status not in allowed_transitions[current_status]:
+                raise InvalidDocumentStatusTransitionError(
+                    f"Cannot transition document from "
+                    f"{current_status} to {new_status}."
+                )
+
+            connection.execute(
+                """
+                UPDATE documents
+                SET status = ?
+                WHERE document_id = ?
+                """,
+                (new_status, document_id),
+            )
+
+            updated_row = connection.execute(
+                """
+                SELECT *
+                FROM documents
+                WHERE document_id = ?
+                """,
+                (document_id,),
+            ).fetchone()
+
+            return dict(updated_row)
+
+    except (
+        DocumentNotFoundError,
+        InvalidDocumentStatusTransitionError,
+    ):
+        raise
+
+    except sqlite3.Error as exc:
+        raise DocumentRepositoryError(
+            "Failed to update document status."
         ) from exc

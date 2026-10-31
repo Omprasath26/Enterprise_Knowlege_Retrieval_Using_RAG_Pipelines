@@ -39,6 +39,10 @@ def register_sample_document(
     )
 
 
+# --------------------------------------------------
+# EXISTING REPOSITORY TESTS
+# --------------------------------------------------
+
 def test_database_initialization(database):
     """Verify that the documents table is created."""
 
@@ -94,13 +98,11 @@ def test_document_persistence_after_reconnection(database):
 
     register_sample_document()
 
-    # A new connection retrieves the previously registered record.
     result = repository.get_document_by_id("doc-001")
 
     assert result is not None
     assert result["document_id"] == "doc-001"
 
-    # Confirm the database file remains present.
     assert database.exists()
 
 
@@ -123,3 +125,106 @@ def test_concurrent_duplicate_registration(database):
 
     assert results.count("success") == 1
     assert results.count("duplicate") == 4
+
+
+# --------------------------------------------------
+# NEW DOCUMENT STATUS TESTS
+# --------------------------------------------------
+
+def test_document_status_uploaded_to_processing(database):
+    register_sample_document()
+
+    result = repository.update_document_status(
+        "doc-001",
+        "PROCESSING",
+    )
+
+    assert result["status"] == "PROCESSING"
+
+
+def test_document_status_processing_to_completed(database):
+    register_sample_document()
+
+    repository.update_document_status("doc-001", "PROCESSING")
+
+    result = repository.update_document_status(
+        "doc-001",
+        "COMPLETED",
+    )
+
+    assert result["status"] == "COMPLETED"
+
+
+def test_document_status_processing_to_failed(database):
+    register_sample_document()
+
+    repository.update_document_status("doc-001", "PROCESSING")
+
+    result = repository.update_document_status(
+        "doc-001",
+        "FAILED",
+    )
+
+    assert result["status"] == "FAILED"
+
+
+def test_failed_document_can_be_retried(database):
+    register_sample_document()
+
+    repository.update_document_status("doc-001", "PROCESSING")
+    repository.update_document_status("doc-001", "FAILED")
+
+    result = repository.update_document_status(
+        "doc-001",
+        "PROCESSING",
+    )
+
+    assert result["status"] == "PROCESSING"
+
+
+def test_repeated_status_update_is_idempotent(database):
+    register_sample_document()
+
+    repository.update_document_status("doc-001", "PROCESSING")
+
+    result = repository.update_document_status(
+        "doc-001",
+        "PROCESSING",
+    )
+
+    assert result["status"] == "PROCESSING"
+
+
+def test_completed_document_cannot_be_reprocessed(database):
+    register_sample_document()
+
+    repository.update_document_status("doc-001", "PROCESSING")
+    repository.update_document_status("doc-001", "COMPLETED")
+
+    with pytest.raises(
+        repository.InvalidDocumentStatusTransitionError
+    ):
+        repository.update_document_status(
+            "doc-001",
+            "PROCESSING",
+        )
+
+
+def test_nonexistent_document_status_update(database):
+    with pytest.raises(repository.DocumentNotFoundError):
+        repository.update_document_status(
+            "missing-document",
+            "PROCESSING",
+        )
+
+
+def test_unsupported_document_status_rejected(database):
+    register_sample_document()
+
+    with pytest.raises(
+        repository.InvalidDocumentStatusTransitionError
+    ):
+        repository.update_document_status(
+            "doc-001",
+            "INVALID",
+        )

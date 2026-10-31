@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-4o-mini"
 
+    # Redis and Celery configuration
+    celery_broker_url: str = "redis://localhost:6379/0"
+    celery_result_backend: str = "redis://localhost:6379/1"
+
     # Document upload configuration
     max_upload_size_mb: int = Field(default=25, ge=1)
     storage_root: Path = Path("storage")
